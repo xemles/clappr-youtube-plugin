@@ -77,6 +77,7 @@ var YoutubePlugin = Clappr.Playback.extend({
     }
     if (this.options.youtubeLivestream) {
       playerVars.channel = this.options.youtubeLivestream;
+      this.options.src = 'live_stream';
     }
     this.player = new YT.Player('yt' + this.cid, {
       videoId: this.options.src,
