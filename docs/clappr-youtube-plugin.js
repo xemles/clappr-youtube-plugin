@@ -1,11 +1,13 @@
+var DEFAULT_PLAYBACK_QUALITIES = [];
+var YOUTUBE_VARIABLES = {
+  "captions": false,
+  "quality": "auto",
+  "languageCode": "en"
+};
+
 var YoutubePlugin = Clappr.Playback.extend({
   name: 'youtube_plugin',
   initialize: function() {
-    this.YoutubePluginPlayer(this.options);
-    this.render();
-  },
-
-  YoutubePluginPlayer: function(options) {
     this.settings = {
       changeCount: 0,
       seekEnabled: true,
@@ -15,6 +17,7 @@ var YoutubePlugin = Clappr.Playback.extend({
     };
     Clappr.Mediator.on(Clappr.Events.PLAYER_RESIZE, this.updateSize, this);
     this.embedYoutubeApiScript();
+    this.render();
   },
 
   setupYoutubePlayer: function() {
@@ -64,13 +67,16 @@ var YoutubePlugin = Clappr.Playback.extend({
       });
     }
     $.each(playerVars, function(key, value) {
-        YOUTUBE_VARIABLES[key] = value;
-      });
+      YOUTUBE_VARIABLES[key] = value;
+    });
 
     YOUTUBE_VARIABLES.id = "yt" + this.cid;
     if (this.options.youtubePlaylist) {
       playerVars.listType = 'playlist';
       playerVars.list = this.options.youtubePlaylist;
+    }
+    if (this.options.youtubeLivestream) {
+      playerVars.channel = this.options.youtubeLivestream;
     }
     this.player = new YT.Player('yt' + this.cid, {
       videoId: this.options.src,
@@ -98,8 +104,6 @@ var YoutubePlugin = Clappr.Playback.extend({
   ready: function() {
     this._ready = true;
     this.trigger(Clappr.Events.PLAYBACK_READY);
-    //this.YTMC = new YoutubePluginControl(newoptions);
-    //this.YTMC.render();
   },
 
   qualityChange: function(event) {
@@ -123,8 +127,17 @@ var YoutubePlugin = Clappr.Playback.extend({
             this.player.setOption("captions", "track", {
               "languageCode": YOUTUBE_VARIABLES.languageCode
             });
+            this.$('#youtube-plugin-cc').css({
+              'border-bottom': '4px double #fff'
+            });
           }
-          console.log('###### Quality Set: ' + YOUTUBE_VARIABLES.rate + ' - player.getPlaybackQuality: ' + this.player.getPlaybackQuality());
+          console.log('###### Quality Set: ' + YOUTUBE_VARIABLES.quality + ' - player.getPlaybackQuality: ' + this.player.getPlaybackQuality());
+          if (YOUTUBE_VARIABLES.paused) { // 2
+            this.enableMediaControl();
+            this.trigger(Clappr.Events.PLAYBACK_PAUSE);
+            this.player.pauseVideo();
+            YOUTUBE_VARIABLES.paused = false;
+          }
           break;
         }
       case YT.PlayerState.PAUSED:
@@ -253,36 +266,45 @@ var YoutubePlugin = Clappr.Playback.extend({
     this.trigger(Clappr.Events.PLAYBACK_MEDIACONTROL_ENABLE);
   },
 
-  subtitleLoaded(evt, data) {
-    this.trigger(Events.CONTAINER_LOADEDTEXTTRACK, evt, data)
+  subtitleLoaded: function(evt, data) {
+    this.trigger(Events.CONTAINER_LOADEDTEXTTRACK, evt, data);
+  },
+
+  attributes: function() {
+    return {
+      'data-youtube-plugin': '',
+      'class': 'clappr-youtube-plugin',
+      id: this.cid
+    };
+  },
+
+  ended: function() {
+    return false;
+  },
+
+  isReady: function() {
+    return this._ready;
   },
 
   render: function() {
     var youtube_html = '<div id="yt' + this.cid + '"></div>';
-    var _YoutubePluginCss = ['.clappr-youtube-playback[data-youtube-playback]{position:absolute;height:100%;width:100%;display:block;pointer-events:none'];
-
+    var _YoutubePluginCss = ['.clappr-youtube-plugin[data-youtube-plugin]{position:absolute;height:100%;width:100%;display:block;pointer-events:none'];
     this.$el.html(youtube_html);
     var style = Clappr.Styler.getStyleFor(_YoutubePluginCss, {
       baseUrl: this.options.baseUrl
     });
     this.$el.append(style);
-
     return this;
   }
 });
+
 YoutubePlugin.canPlay = function(source) {
   return true;
 };
 
 
-//// YoutubePluginControl //////////
 
-var DEFAULT_PLAYBACK_RATES = [];
-var YOUTUBE_VARIABLES = {
-  "captions": false,
-  "rate": "auto",
-  "languageCode": "en"
-};
+//// YoutubePluginControl //////////
 
 var YoutubePluginControl = Clappr.UICorePlugin.extend({
 
@@ -293,7 +315,7 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
     this.listenTo(this.core.mediaControl, Clappr.Events.MEDIACONTROL_HIDE, this.hideContextMenu);
     this.listenTo(this.core.mediaControl, Clappr.Events.MEDIACONTROL_PLAYING, this.hideControlPaused);
     this.listenTo(this.core.mediaControl, Clappr.Events.MEDIACONTROL_NOTPLAYING, this.showControlPaused);
-    this.listenTo(this.core.mediaControl, YoutubePluginControl.MEDIACONTROL_YOUTUBECONTROL, this.updatePlaybackRate);
+    this.listenTo(this.core.mediaControl, YoutubePluginControl.MEDIACONTROL_YOUTUBECONTROL, this.updatePlaybackQuality);
   },
   unBindEvents: function() {
     this.stopListening(this.core.mediaControl, Clappr.Events.MEDIACONTROL_CONTAINERCHANGED);
@@ -304,6 +326,11 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
   reload: function() {
     this.unBindEvents();
     this.bindEvents();
+    $(document).on('click', function(e) {
+      if (e.target.id != "youtubeQuality") {
+        $(".youtube_plugin_control ul").hide();
+      }
+    });
   },
   shouldRender: function() {
     if (!this.core.getCurrentContainer()) {
@@ -311,7 +338,7 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
     }
 
     if (window.YT && window.YT.Player) {
-      DEFAULT_PLAYBACK_RATES = [];
+      DEFAULT_PLAYBACK_QUALITIES = [];
       this.ytplayer = YT.get(YOUTUBE_VARIABLES.id);
       var quality = this.ytplayer.getAvailableQualityLevels();
       var qualityDict = {
@@ -326,7 +353,7 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
       };
 
       for (var i = 0; i < quality.length; i++) {
-        DEFAULT_PLAYBACK_RATES.push({
+        DEFAULT_PLAYBACK_QUALITIES.push({
           value: quality[i],
           label: qualityDict[quality[i]]
         });
@@ -337,18 +364,15 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
     return false;
   },
   render: function() {
-    var cfg = this.core.options.playbackRateConfig || {};   
-    if (!this.playbackRates) {
-
-    }
-    if (!this.selectedRate) {
-      this.selectedRate = YOUTUBE_VARIABLES.rate = "auto";
+    if (!this.selectedQuality) {
+      this.selectedQuality = YOUTUBE_VARIABLES.quality = "auto";
     }
     if (this.shouldRender()) {
-      this.playbackRates = cfg.options || DEFAULT_PLAYBACK_RATES;
-      var t = (0, Clappr.template)(this.template());
+
+      this.playbackQualities = DEFAULT_PLAYBACK_QUALITIES;
+      var t = Clappr.template(this.template());
       var html = t({
-        playbackRates: this.playbackRates,
+        playbackQualities: this.playbackQualities,
         title: this.getTitle()
       });
       this.$el.html(html);
@@ -366,9 +390,9 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
 
     return this;
   },
-  onRateSelect: function(event) { //console.log('onRateSelect', event.target);
-    var rate = event.target.dataset.youtubeControlSelect;
-    this.setSelectedRate(rate);
+  onQualitySelect: function(event) { //console.log('onQualitySelect', event.target);
+    var quality = event.target.dataset.youtubeControlSelect;
+    this.setSelectedQuality(quality);
     this.toggleContextMenu();
     event.stopPropagation();
     return false;
@@ -382,32 +406,33 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
   hideContextMenu: function() {
     this.$('.youtube_plugin_control ul').hide();
   },
-  updatePlaybackRate: function(rate) {
-    this.setSelectedRate(rate);
+  updatePlaybackQuality: function(quality) {
+    this.setSelectedQuality(quality);
   },
-  setSelectedRate: function(rate) {
-    this.selectedRate = rate;
+  setSelectedQuality: function(quality) {
+    this.selectedQuality = quality;
     var currentTIme = this.ytplayer.getCurrentTime();
+    YOUTUBE_VARIABLES.paused = this.ytplayer.getPlayerState() == 2 ? true : false;
     this.ytplayer.stopVideo();
-    this.ytplayer.setPlaybackQuality(rate);
-    this.ytplayer.playVideo();
+    this.ytplayer.setPlaybackQuality(quality);
+    //this.ytplayer.playVideo();
     this.ytplayer.seekTo(currentTIme, false);
     this.updateText();
-    YOUTUBE_VARIABLES.rate = rate;
+    YOUTUBE_VARIABLES.quality = quality;
   },
 
-  setActiveListItem: function(rateValue) {
-    this.$('a').removeClass('active');
-    this.$('a[data-youtube-control-select="' + rateValue + '"]').addClass('active');
+  setActiveListItem: function(qualityValue) {
+    this.$('li div').removeClass('active');
+    this.$('div[data-youtube-control-select="' + qualityValue + '"]').addClass('active');
   },
   buttonElement: function() {
     return this.$('#youtubeQuality');
   },
   getTitle: function() {
     var _this = this;
-    var title = this.selectedRate;
-    this.playbackRates.forEach(function(r) {
-      if (r.value == _this.selectedRate) {
+    var title = this.selectedQuality;
+    this.playbackQualities.forEach(function(r) {
+      if (r.value == _this.selectedQuality) {
         title = r.label;
       }
     });
@@ -415,20 +440,21 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
   },
   updateText: function() {
     this.buttonElement().text(this.getTitle());
-    this.setActiveListItem(this.selectedRate);
+    this.setActiveListItem(this.selectedQuality);
   },
   template: function() {
-    tmpl = "<button id='youtube-plugin-cc'>CC</button><button id='youtubeQuality' data-youtube-control-button>\n  <%= title %>\n</button>\n<ul>\n  <% for (var i = 0; i < playbackRates.length; i++) { %>\n    <li><a href=\"#\" data-youtube-control-select=\"<%= playbackRates[i].value %>\"><%= playbackRates[i].label %></a></li>\n  <% }; %>\n</ul>\n";
+    tmpl = "<button id='youtube-plugin-cc'>CC</button><button id='youtubeQuality' data-youtube-control-button>\n  <%= title %>\n</button>\n<ul>\n  <% for (var i = 0; i < playbackQualities.length; i++) { %>\n    <li><div data-youtube-control-select=\"<%= playbackQualities[i].value %>\"><%= playbackQualities[i].label %></div></li>\n  <% }; %>\n</ul>\n";
     return tmpl;
   },
   templateCSS: function() {
-    css = "#youtube-plugin-cc{padding: 0 1px;margin-right: 5px;}\n .youtube_plugin_control[data-youtube-control-select] {\n  float: right;\n  margin-top: 5px;\n  position: relative; }\n  .youtube_plugin_control[data-youtube-control-select] button {\n    background-color: transparent;\n    color: #fff;\n    font-family: Roboto,\"Open Sans\",Arial,sans-serif;\n    -webkit-font-smoothing: antialiased;\n    border: none;\n    font-size: 10px;\n    cursor: pointer; }\n    .youtube_plugin_control[data-youtube-control-select] button:hover {\n      color: #c9c9c9; }\n    .youtube_plugin_control[data-youtube-control-select] button.changing {\n      -webkit-animation: pulse 0.5s infinite alternate; }\n  .youtube_plugin_control[data-youtube-control-select] > ul {\n    display: none;\n    list-style-type: none;\n    position: absolute;\n    bottom: 25px;\n    border: 1px solid black;\n    border-radius: 4px;\n    background-color: rgba(0, 0, 0, 0.7); }\n  .youtube_plugin_control[data-youtube-control-select] li {\n    position: relative;\n    font-size: 10px; }\n    .youtube_plugin_control[data-youtube-control-select] li[data-title] {\n      padding: 5px; }\n    .youtube_plugin_control[data-youtube-control-select] li a {\n      color: #aaa;\n      padding: 2px 10px 2px 15px;\n      display: block;\n      text-decoration: none; }\n      .youtube_plugin_control[data-youtube-control-select] li a.active {\n        background-color: black;\n        font-weight: bold;\n        color: #fff; }\n        .youtube_plugin_control[data-youtube-control-select] li a.active:before {\n          content: '\\2713';\n          position: absolute;\n          top: 2px;\n          left: 4px; }\n      .youtube_plugin_control[data-youtube-control-select] li a:hover {\n        color: #fff;\n        text-decoration: none; }\n\n@-webkit-keyframes pulse {\n  0% {\n    color: #fff; }\n  50% {\n    color: #ff0101; }\n  100% {\n    color: #B80000; } }\n";
+    css = "#youtube-plugin-cc{padding: 0 1px;margin-right: 5px;}\n .youtube_plugin_control[data-youtube-control-select] {\n  float: right;\n  margin-top: 5px;\n  position: relative; }\n  .youtube_plugin_control[data-youtube-control-select] button {\n    background-color: transparent;\n    color: #fff;\n    font-family: Roboto,\"Open Sans\",Arial,sans-serif;\n    -webkit-font-smoothing: antialiased;\n    border: none;\n    font-size: 10px;\n    cursor: pointer; }\n    .youtube_plugin_control[data-youtube-control-select] button:hover {\n      color: #c9c9c9; }\n    .youtube_plugin_control[data-youtube-control-select] button.changing {\n      -webkit-animation: pulse 0.5s infinite alternate; }\n  .youtube_plugin_control[data-youtube-control-select] > ul {\n    display: none;\n    list-style-type: none;\n    position: absolute;\n    bottom: 25px;\n    border: 1px solid black;\n    border-radius: 4px;\n    background-color: rgba(0, 0, 0, 0.7); }\n  .youtube_plugin_control[data-youtube-control-select] li {\n    position: relative;\n    font-size: 10px; }\n    .youtube_plugin_control[data-youtube-control-select] li[data-title] {\n      padding: 5px; }\n    .youtube_plugin_control[data-youtube-control-select] li div {\n cursor:pointer; color: #aaa;\n      padding: 2px 10px 2px 15px;\n      display: block;\n      text-decoration: none; }\n      .youtube_plugin_control[data-youtube-control-select] li div.active {\n        background-color: black;\n        color: #fff; }\n        .youtube_plugin_control[data-youtube-control-select] li div.active:before {\n          content: '\\2713';\n          position: absolute;\n          top: 2px;\n          left: 4px; }\n      .youtube_plugin_control[data-youtube-control-select] li div:hover {\n        color: #fff;\n        text-decoration: none; }\n\n@-webkit-keyframes pulse {\n  0% {\n    color: #fff; }\n  50% {\n    color: #ff0101; }\n  100% {\n    color: #B80000; } }\n";
     return css;
   },
   attributes: function() {
     return {
       'class': this.name,
-      'data-youtube-control-select': ''
+      'data-youtube-control-select': '',
+      id: this.cid
     };
   },
   hideControlPaused: function() {
@@ -467,7 +493,7 @@ var YoutubePluginControl = Clappr.UICorePlugin.extend({
   },
   events: function() {
     return {
-      'click [data-youtube-control-select]': 'onRateSelect',
+      'click [data-youtube-control-select]': 'onQualitySelect',
       'click [data-youtube-control-button]': 'onShowMenu',
       'click #youtube-plugin-cc': 'YTtoggleCaptions',
     };
