@@ -165,6 +165,7 @@ var YoutubePlugin = Clappr.Playback.extend({
     var _this4 = this;
 
     if (this.player) {
+      player.setVolume(player.getVolume());
       this._progressTimer = this._progressTimer || setInterval(function() {
         return _this4.progress();
       }, 100);
